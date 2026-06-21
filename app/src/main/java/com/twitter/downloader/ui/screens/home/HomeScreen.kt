@@ -11,6 +11,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,14 +47,19 @@ fun HomeScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // Update check
+    // Update check (缓存1小时)
     var updateInfo by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
     var showUpdateDialog by remember { mutableStateOf(false) }
+    var lastCheckTime by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(Unit) {
-        updateInfo = UpdateChecker.checkForUpdate(context)
-        if (updateInfo?.hasUpdate == true) {
-            showUpdateDialog = true
+        val now = System.currentTimeMillis()
+        if (now - lastCheckTime > 3600000) { // 1小时
+            lastCheckTime = now
+            updateInfo = UpdateChecker.checkForUpdate(context)
+            if (updateInfo?.hasUpdate == true) {
+                showUpdateDialog = true
+            }
         }
     }
 
@@ -261,10 +268,14 @@ fun HomeScreen(
                         }
                     }
                     is DownloadState.Success -> {
-                        LaunchedEffect(state) {
-                            val message = "下载完成! 共 ${state.count} 个文件"
-                            viewModel.clearState()
-                            snackbarHostState.showSnackbar(message)
+                        val lastShownCount = remember { mutableIntStateOf(-1) }
+                        LaunchedEffect(state.count) {
+                            if (lastShownCount.intValue != state.count) {
+                                lastShownCount.intValue = state.count
+                                val message = "下载完成! 共 ${state.count} 个文件"
+                                viewModel.clearState()
+                                snackbarHostState.showSnackbar(message)
+                            }
                         }
                     }
                     is DownloadState.Error -> {

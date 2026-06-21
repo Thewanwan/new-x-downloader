@@ -95,7 +95,12 @@ class DownloadService : Service() {
         restId: String,
         incremental: Boolean
     ) {
-        currentJob?.cancel()
+        // 检查是否已有下载任务在运行
+        if (currentJob?.isActive == true) {
+            Logger.w("Download", "已有下载任务在运行，先取消")
+            currentJob?.cancel()
+        }
+
         currentJob = scope.launch {
             Logger.logDownloadStart(screenName)
             _downloadState.value = DownloadState.Loading(

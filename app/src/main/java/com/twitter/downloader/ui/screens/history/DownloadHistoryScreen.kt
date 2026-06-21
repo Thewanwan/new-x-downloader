@@ -113,12 +113,16 @@ fun DownloadHistoryItem(download: DownloadEntity) {
 
     fun openFile() {
         if (download.filePath.isEmpty()) {
-            Toast.makeText(context, "文件路径为空", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "文件路径为空，可能下载未完成", Toast.LENGTH_LONG).show()
             return
         }
         val file = File(download.filePath)
         if (!file.exists()) {
-            Toast.makeText(context, "文件不存在: ${file.name}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "文件不存在，可能已被删除或移动", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (file.length() == 0L) {
+            Toast.makeText(context, "文件为空，下载可能失败", Toast.LENGTH_LONG).show()
             return
         }
 
