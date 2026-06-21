@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.twitter.downloader.TwitterDownloaderApp
-import com.twitter.downloader.data.local.entity.UserEntity
 import com.twitter.downloader.data.remote.TwitterApi
 import com.twitter.downloader.data.repository.UserRepository
 import com.twitter.downloader.util.Logger

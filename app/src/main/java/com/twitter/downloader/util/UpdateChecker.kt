@@ -3,7 +3,7 @@ package com.twitter.downloader.util
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import com.twitter.downloader.data.remote.TwitterApi
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
