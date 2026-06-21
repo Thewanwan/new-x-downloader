@@ -29,6 +29,7 @@ fun HomeScreen(
     val downloadState by DownloadService.downloadState.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showDownloadDialog by remember { mutableStateOf<UserEntity?>(null) }
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -157,7 +158,6 @@ fun HomeScreen(
             user = user,
             onDismiss = { showDownloadDialog = null },
             onDownload = { incremental ->
-                val context = androidx.compose.ui.platform.LocalContext.current
                 DownloadService.start(context, user, incremental)
                 showDownloadDialog = null
             }

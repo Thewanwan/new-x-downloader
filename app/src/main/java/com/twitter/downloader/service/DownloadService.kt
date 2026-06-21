@@ -123,6 +123,9 @@ class DownloadService : Service() {
                         _downloadState.value = DownloadState.Error(response.message)
                         hasMore = false
                     }
+                    null -> {
+                        hasMore = false
+                    }
                 }
             }
 
