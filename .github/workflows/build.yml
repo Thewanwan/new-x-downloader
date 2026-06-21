@@ -32,18 +32,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Generate Keystore
-        run: |
-          keytool -genkeypair -v \
-            -keystore ${{ github.workspace }}/release-key.jks \
-            -alias xdownloader \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass xdownloader123 \
-            -keypass xdownloader123 \
-            -dname "CN=XDownloader, OU=Dev, O=Dev, L=Beijing, S=Beijing, C=CN"
-
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
