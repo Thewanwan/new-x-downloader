@@ -7,6 +7,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 class TwitterApi {
@@ -15,7 +17,7 @@ class TwitterApi {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private val bearerToken = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
@@ -31,11 +33,11 @@ class TwitterApi {
     }
 
     private fun extractCsrfToken(cookie: String): String {
-        val regex = Regex("ct0=(.*?);")
+        val regex = Regex("""ct0=([^;\s]+)""")
         return regex.find(cookie)?.groupValues?.get(1) ?: ""
     }
 
-    private fun getJsonString(obj: kotlinx.serialization.json.JsonObject?, key: String): String {
+    private fun safeGetString(obj: kotlinx.serialization.json.JsonObject?, key: String): String {
         return try {
             obj?.get(key)?.jsonPrimitive?.content ?: ""
         } catch (e: Exception) {
@@ -43,7 +45,7 @@ class TwitterApi {
         }
     }
 
-    private fun getJsonLong(obj: kotlinx.serialization.json.JsonObject?, key: String): Long {
+    private fun safeGetLong(obj: kotlinx.serialization.json.JsonObject?, key: String): Long {
         return try {
             obj?.get(key)?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
         } catch (e: Exception) {
@@ -51,7 +53,7 @@ class TwitterApi {
         }
     }
 
-    private fun getJsonInt(obj: kotlinx.serialization.json.JsonObject?, key: String): Int {
+    private fun safeGetInt(obj: kotlinx.serialization.json.JsonObject?, key: String): Int {
         return try {
             obj?.get(key)?.jsonPrimitive?.content?.toIntOrNull() ?: 0
         } catch (e: Exception) {
@@ -70,42 +72,41 @@ class TwitterApi {
 
         val url = "https://twitter.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName?variables=$variables&features=$features"
 
-        return try {
-            val request = Request.Builder()
-                .url(url)
-                .apply { headers.forEach { (k, v) -> addHeader(k, v) } }
-                .get()
-                .build()
+        val request = Request.Builder()
+            .url(url)
+            .apply { headers.forEach { (k, v) -> addHeader(k, v) } }
+            .get()
+            .build()
 
-            val response = client.newCall(request).execute()
-
+        return client.newCall(request).execute().use { response ->
             when (response.code) {
                 429 -> throw Exception("API次数已超限，请稍后再试")
                 401, 403 -> throw Exception("Cookie无效或已过期，请重新获取")
                 404 -> throw Exception("用户不存在: @$screenName")
             }
 
-            val body = response.body?.string() ?: return null
+            val body = response.body?.string() ?: return@use null
 
             if (body.contains("Rate limit exceeded")) {
                 throw Exception("API次数已超限")
             }
 
-            val data = json.parseToJsonElement(body).jsonObject
-            val userResult = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
-                ?: return null
-            val legacy = userResult["legacy"]?.jsonObject ?: return null
+            try {
+                val data = json.parseToJsonElement(body).jsonObject
+                val userResult = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
+                    ?: return@use null
+                val legacy = userResult["legacy"]?.jsonObject ?: return@use null
 
-            UserInfo(
-                restId = getJsonString(userResult, "rest_id"),
-                screenName = screenName,
-                name = getJsonString(legacy, "name"),
-                statusesCount = getJsonInt(legacy, "statuses_count"),
-                mediaCount = getJsonInt(legacy, "media_count")
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
-            throw e
+                UserInfo(
+                    restId = safeGetString(userResult, "rest_id"),
+                    screenName = screenName,
+                    name = safeGetString(legacy, "name"),
+                    statusesCount = safeGetInt(legacy, "statuses_count"),
+                    mediaCount = safeGetInt(legacy, "media_count")
+                )
+            } catch (e: Exception) {
+                null
+            }
         }
     }
 
@@ -134,20 +135,20 @@ class TwitterApi {
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
+            client.newCall(request).execute().use { response ->
+                when (response.code) {
+                    429 -> return MediaResponse.Error("API次数已超限，请稍后再试")
+                    401, 403 -> return MediaResponse.Error("Cookie无效或已过期")
+                }
 
-            when (response.code) {
-                429 -> return MediaResponse.Error("API次数已超限，请稍后再试")
-                401, 403 -> return MediaResponse.Error("Cookie无效或已过期")
+                val body = response.body?.string() ?: return MediaResponse.Error("获取数据失败")
+
+                if (body.contains("Rate limit exceeded")) {
+                    return MediaResponse.Error("API次数已超限")
+                }
+
+                parseMediaResponse(body)
             }
-
-            val body = response.body?.string() ?: return MediaResponse.Error("获取数据失败")
-
-            if (body.contains("Rate limit exceeded")) {
-                return MediaResponse.Error("API次数已超限")
-            }
-
-            parseMediaResponse(body)
         } catch (e: java.net.SocketTimeoutException) {
             MediaResponse.Error("网络超时，请检查网络连接")
         } catch (e: java.net.UnknownHostException) {
@@ -204,17 +205,17 @@ class TwitterApi {
                         ?: tweetResult["edit_control"]?.jsonObject
                         ?: continue
 
-                    val tweetTime = getJsonLong(editControl, "editable_until_msecs") - 3600000
-                    val tweetId = getJsonString(legacy, "id_str")
-                    val tweetContent = getJsonString(legacy, "full_text")
-                    val favoriteCount = getJsonInt(legacy, "favorite_count")
-                    val retweetCount = getJsonInt(legacy, "retweet_count")
-                    val replyCount = getJsonInt(legacy, "reply_count")
+                    val tweetTime = safeGetLong(editControl, "editable_until_msecs") - 3600000
+                    val tweetId = safeGetString(legacy, "id_str")
+                    val tweetContent = safeGetString(legacy, "full_text")
+                    val favoriteCount = safeGetInt(legacy, "favorite_count")
+                    val retweetCount = safeGetInt(legacy, "retweet_count")
+                    val replyCount = safeGetInt(legacy, "reply_count")
 
                     val userResult = tweetResult["core"]?.jsonObject?.get("user_results")?.jsonObject?.get("result")?.jsonObject
                     val userLegacy = userResult?.get("legacy")?.jsonObject
-                    val userName = getJsonString(userLegacy, "name")
-                    val userScreenName = getJsonString(userLegacy, "screen_name")
+                    val userName = safeGetString(userLegacy, "name")
+                    val userScreenName = safeGetString(userLegacy, "screen_name")
 
                     if (legacy.containsKey("extended_entities")) {
                         val mediaArray = legacy["extended_entities"]?.jsonObject?.get("media")?.jsonArray
@@ -308,46 +309,96 @@ class TwitterApi {
                     .get()
                     .build()
 
-                val response = client.newCall(request).execute()
-
-                when (response.code) {
-                    200 -> {
-                        val bytes = response.body?.bytes()
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            return bytes
+                return client.newCall(request).execute().use { response ->
+                    when (response.code) {
+                        200 -> {
+                            response.body?.bytes()
                         }
-                    }
-                    429 -> {
-                        val retryAfter = response.header("Retry-After")?.toLongOrNull() ?: 30
-                        Thread.sleep(retryAfter * 1000)
-                        return@repeat
-                    }
-                    404 -> {
-                        return null
+                        429 -> {
+                            val retryAfter = response.header("Retry-After")?.toLongOrNull() ?: 30
+                            kotlinx.coroutines.delay(retryAfter * 1000)
+                            null
+                        }
+                        404 -> null
+                        else -> null
                     }
                 }
             } catch (e: java.net.SocketTimeoutException) {
                 lastException = e
                 if (attempt < maxRetries - 1) {
-                    Thread.sleep(1000L * (attempt + 1))
+                    kotlinx.coroutines.delay(1000L * (attempt + 1))
                 }
             } catch (e: java.net.UnknownHostException) {
                 return null
             } catch (e: java.net.ConnectException) {
                 lastException = e
                 if (attempt < maxRetries - 1) {
-                    Thread.sleep(2000L * (attempt + 1))
+                    kotlinx.coroutines.delay(2000L * (attempt + 1))
                 }
             } catch (e: Exception) {
                 lastException = e
                 if (attempt < maxRetries - 1) {
-                    Thread.sleep(1000L * (attempt + 1))
+                    kotlinx.coroutines.delay(1000L * (attempt + 1))
                 }
             }
         }
 
         lastException?.printStackTrace()
         return null
+    }
+
+    suspend fun downloadFileTo(url: String, outputFile: File, maxRetries: Int = 3): Boolean {
+        var lastException: Exception? = null
+
+        repeat(maxRetries) { attempt ->
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .build()
+
+                return client.newCall(request).execute().use { response ->
+                    when (response.code) {
+                        200 -> {
+                            val body = response.body ?: return@use false
+                            body.byteStream().use { input ->
+                                FileOutputStream(outputFile).use { output ->
+                                    input.copyTo(output, bufferSize = 8192)
+                                }
+                            }
+                            outputFile.exists() && outputFile.length() > 0
+                        }
+                        429 -> {
+                            val retryAfter = response.header("Retry-After")?.toLongOrNull() ?: 30
+                            kotlinx.coroutines.delay(retryAfter * 1000)
+                            false
+                        }
+                        404 -> false
+                        else -> false
+                    }
+                }
+            } catch (e: java.net.SocketTimeoutException) {
+                lastException = e
+                if (attempt < maxRetries - 1) {
+                    kotlinx.coroutines.delay(1000L * (attempt + 1))
+                }
+            } catch (e: java.net.UnknownHostException) {
+                return false
+            } catch (e: java.net.ConnectException) {
+                lastException = e
+                if (attempt < maxRetries - 1) {
+                    kotlinx.coroutines.delay(2000L * (attempt + 1))
+                }
+            } catch (e: Exception) {
+                lastException = e
+                if (attempt < maxRetries - 1) {
+                    kotlinx.coroutines.delay(1000L * (attempt + 1))
+                }
+            }
+        }
+
+        lastException?.printStackTrace()
+        return false
     }
 }
 

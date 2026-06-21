@@ -62,6 +62,9 @@ class DownloadService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+            else -> {
+                stopSelf()
+            }
         }
         return START_NOT_STICKY
     }
@@ -78,8 +81,17 @@ class DownloadService : Service() {
             _downloadState.value = DownloadState.Loading("正在获取推文...")
 
             try {
-                val saveDir = File(getExternalFilesDir(null), screenName)
-                if (!saveDir.exists()) saveDir.mkdirs()
+                val externalDir = getExternalFilesDir(null)
+                if (externalDir == null) {
+                    _downloadState.value = DownloadState.Error("无法访问外部存储")
+                    return@launch
+                }
+
+                val saveDir = File(externalDir, screenName)
+                if (!saveDir.exists() && !saveDir.mkdirs()) {
+                    _downloadState.value = DownloadState.Error("无法创建保存目录")
+                    return@launch
+                }
 
                 val existingUrls = if (incremental) {
                     repository.getDownloadedUrls(userId)

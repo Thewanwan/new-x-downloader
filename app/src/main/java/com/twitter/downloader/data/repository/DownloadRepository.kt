@@ -7,6 +7,7 @@ import com.twitter.downloader.data.remote.TwitterApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 
 class DownloadRepository(
@@ -47,20 +48,28 @@ class DownloadRepository(
                 return@withContext true
             }
 
-            val bytes = api.downloadFile(item.mediaUrl) ?: return@withContext false
-
             val tempFile = File(saveDir, "$fileName.tmp")
             try {
-                tempFile.writeBytes(bytes)
+                tempFile.delete()
+                val success = api.downloadFileTo(item.mediaUrl, tempFile)
+                if (!success || !tempFile.exists() || tempFile.length() == 0L) {
+                    tempFile.delete()
+                    return@withContext false
+                }
+
                 if (file.exists()) file.delete()
-                tempFile.renameTo(file)
+                val renamed = tempFile.renameTo(file)
+                if (!renamed) {
+                    tempFile.copyTo(file, overwrite = true)
+                    tempFile.delete()
+                }
+
+                if (!file.exists() || file.length() == 0L) {
+                    return@withContext false
+                }
             } catch (e: IOException) {
                 tempFile.delete()
                 throw e
-            }
-
-            if (!file.exists() || file.length() == 0L) {
-                return@withContext false
             }
 
             try {
