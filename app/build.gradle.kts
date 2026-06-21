@@ -10,7 +10,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.twitter.downloader"
+        applicationId = "com.xdownloader.app"
         minSdk = 26
         targetSdk = 35
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
