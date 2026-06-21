@@ -8,10 +8,12 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class TwitterApi {
@@ -80,7 +82,11 @@ class TwitterApi {
         val features = """{"hidden_profile_likes_enabled":false,"hidden_profile_subscriptions_enabled":false,"responsive_web_graphql_exclude_directive_enabled":true,"verified_phone_label_enabled":false,"subscriptions_verification_info_verified_since_enabled":true,"highlights_tweets_tab_ui_enabled":true,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"responsive_web_graphql_timeline_navigation_enabled":true}"""
         val fieldToggles = """{"withAuxiliaryUserLabels":false}"""
 
-        val url = "https://twitter.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName?variables=$variables&features=$features&fieldToggles=$fieldToggles"
+        val url = buildApiUrl(
+            "https://twitter.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName",
+            mapOf("variables" to variables, "features" to features, "fieldToggles" to fieldToggles)
+        )
+        Logger.d("API", "URL: $url")
 
         val request = Request.Builder()
             .url(url)
@@ -169,7 +175,10 @@ class TwitterApi {
         val variables = """{"userId":"$userId","count":200,$cursorPart"includePromotedContent":false,"withClientEventToken":false,"withBirdwatchNotes":false,"withVoice":true,"withV2Timeline":true}"""
         val features = """{"rweb_video_screen_enabled":false,"profile_label_improvements_pcf_label_in_post_enabled":true,"rweb_tipjar_consumption_enabled":true,"verified_phone_label_enabled":false,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_timeline_navigation_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"premium_content_api_read_enabled":false,"communities_web_enable_tweet_community_results_fetch":true,"c9s_tweet_anatomy_moderator_badge_enabled":true,"responsive_web_grok_analyze_button_fetch_trends_enabled":false,"responsive_web_grok_analyze_post_followups_enabled":true,"responsive_web_jetfuel_frame":false,"responsive_web_grok_share_attachment_enabled":true,"articles_preview_enabled":true,"responsive_web_edit_tweet_api_enabled":true,"graphql_is_translatable_rweb_tweet_is_translatable_enabled":true,"view_counts_everywhere_api_enabled":true,"longform_notetweets_consumption_enabled":true,"responsive_web_twitter_article_tweet_consumption_enabled":true,"tweet_awards_web_tipping_enabled":false,"responsive_web_grok_show_grok_translated_post":false,"responsive_web_grok_analysis_button_from_backend":false,"creator_subscriptions_quote_tweet_preview_enabled":false,"freedom_of_speech_not_reach_fetch_enabled":true,"standardized_nudges_misinfo":true,"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true,"longform_notetweets_rich_text_read_enabled":true,"longform_notetweets_inline_media_enabled":true,"responsive_web_grok_image_annotation_enabled":true,"responsive_web_enhance_cards_enabled":false}"""
 
-        val url = "https://twitter.com/i/api/graphql/Le6KlbilFmSu-5VltFND-Q/UserMedia?variables=$variables&features=$features"
+        val url = buildApiUrl(
+            "https://twitter.com/i/api/graphql/Le6KlbilFmSu-5VltFND-Q/UserMedia",
+            mapOf("variables" to variables, "features" to features)
+        )
 
         try {
             val request = Request.Builder()
@@ -338,33 +347,16 @@ class TwitterApi {
         return highestUrl
     }
 
-    private fun urlEncode(url: String): String {
-        val questionMarkIndex = url.indexOf('?')
-        if (questionMarkIndex == -1) return url
-
-        val baseUrl = url.substring(0, questionMarkIndex)
-        val queryString = url.substring(questionMarkIndex + 1)
-
-        val encodedParams = queryString.split("&").joinToString("&") { param ->
-            val eqIndex = param.indexOf('=')
-            if (eqIndex == -1) {
-                param
-            } else {
-                val key = param.substring(0, eqIndex)
-                val value = param.substring(eqIndex + 1)
-                val encodedValue = value
-                    .replace("{", "%7B")
-                    .replace("}", "%7D")
-                    .replace("\"", "%22")
-                    .replace(":", "%3A")
-                    .replace(",", "%2C")
-                    .replace(" ", "%20")
-                "$key=$encodedValue"
+    private fun buildApiUrl(baseUrl: String, params: Map<String, String>): String {
+        val httpUrl = baseUrl.toHttpUrl().newBuilder().apply {
+            params.forEach { (key, value) ->
+                addQueryParameter(key, value)
             }
-        }
-
-        return "$baseUrl?$encodedParams"
+        }.build()
+        return httpUrl.toString()
     }
+
+    private fun urlEncode(url: String): String = url
 
     suspend fun downloadFile(url: String, maxRetries: Int = 3): ByteArray? = withContext(Dispatchers.IO) {
         var lastException: Exception? = null
