@@ -71,6 +71,13 @@ class DownloadService : Service() {
                 val restId = intent.getStringExtra(EXTRA_REST_ID) ?: ""
                 val incremental = intent.getBooleanExtra(EXTRA_INCREMENTAL, true)
 
+                if (userId == -1L || screenName.isEmpty() || cookie.isEmpty() || restId.isEmpty()) {
+                    _downloadState.value = DownloadState.Error("重试参数不完整")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
                 startForeground(NOTIFICATION_ID, createNotification("重试下载 @$screenName..."))
                 startDownload(userId, screenName, cookie, restId, incremental)
             }
@@ -355,7 +362,11 @@ class DownloadService : Service() {
             val intent = Intent(context, DownloadService::class.java).apply {
                 action = ACTION_STOP
             }
-            context.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 }
