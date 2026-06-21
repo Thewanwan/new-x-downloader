@@ -104,16 +104,19 @@ fun HomeScreen(
                     selected = false,
                     onClick = {
                         scope.launch { drawerState.close() }
-                        updateInfo?.let {
-                            if (it.hasUpdate) {
-                                showUpdateDialog = true
-                            } else {
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("当前已是最新版本")
+                        scope.launch {
+                            snackbarHostState.showSnackbar("正在检查更新...")
+                            val result = UpdateChecker.checkForUpdate(context)
+                            if (result != null) {
+                                updateInfo = result
+                                if (result.hasUpdate) {
+                                    showUpdateDialog = true
+                                } else {
+                                    snackbarHostState.showSnackbar("当前已是最新版本 v${result.latestVersion}")
                                 }
+                            } else {
+                                snackbarHostState.showSnackbar("检查更新失败，请检查网络连接")
                             }
-                        } ?: scope.launch {
-                            snackbarHostState.showSnackbar("检查更新失败")
                         }
                     },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)

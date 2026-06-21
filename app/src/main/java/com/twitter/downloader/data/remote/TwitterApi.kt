@@ -1,5 +1,6 @@
 package com.twitter.downloader.data.remote
 
+import com.twitter.downloader.util.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -65,7 +66,11 @@ class TwitterApi {
 
     suspend fun getUserInfo(screenName: String, cookie: String): UserInfo? = withContext(Dispatchers.IO) {
         val csrfToken = extractCsrfToken(cookie)
-        if (csrfToken.isEmpty()) return@withContext null
+        if (csrfToken.isEmpty()) {
+            Logger.w("API", "CSRF token为空，cookie格式可能错误")
+            return@withContext null
+        }
+        Logger.d("API", "获取用户信息: @$screenName, csrfToken: ${csrfToken.take(10)}...")
 
         val headers = buildHeaders(cookie, csrfToken, "https://x.com/$screenName")
 
@@ -81,15 +86,27 @@ class TwitterApi {
             .build()
 
         client.newCall(request).execute().use { response ->
+            Logger.d("API", "响应码: ${response.code}")
             when (response.code) {
-                429 -> throw Exception("API次数已超限，请稍后再试")
-                401, 403 -> throw Exception("Cookie无效或已过期，请重新获取")
-                404 -> throw Exception("用户不存在: @$screenName")
+                429 -> {
+                    Logger.e("API", "API次数已超限")
+                    throw Exception("API次数已超限，请稍后再试")
+                }
+                401, 403 -> {
+                    Logger.e("API", "Cookie无效: ${response.code}")
+                    throw Exception("Cookie无效或已过期，请重新获取")
+                }
+                404 -> {
+                    Logger.e("API", "用户不存在: @$screenName")
+                    throw Exception("用户不存在: @$screenName")
+                }
             }
 
             val body = response.body?.string() ?: return@use null
+            Logger.d("API", "响应长度: ${body.length}")
 
             if (body.contains("Rate limit exceeded")) {
+                Logger.e("API", "Rate limit exceeded")
                 throw Exception("API次数已超限")
             }
 

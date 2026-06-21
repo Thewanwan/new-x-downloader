@@ -4,17 +4,18 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.net.HttpURLConnection
 import java.net.URL
 
 object UpdateChecker {
 
+    private const val TAG = "UpdateChecker"
     private const val REPO_OWNER = "Thewanwan"
     private const val REPO_NAME = "new-x-downloader"
-    private const val PREFS_NAME = "app_prefs"
-    private const val KEY_VERSION = "current_version"
 
     data class UpdateInfo(
         val hasUpdate: Boolean,
@@ -26,14 +27,31 @@ object UpdateChecker {
     suspend fun checkForUpdate(context: Context): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
             val currentVersion = getCurrentVersion(context)
+            Logger.i(TAG, "当前版本: $currentVersion")
+
             val url = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-            val connection = URL(url).openConnection()
+            Logger.i(TAG, "请求: $url")
+
+            val connection = URL(url).openConnection() as HttpURLConnection
             connection.setRequestProperty("Accept", "application/vnd.github.v3+json")
+            connection.setRequestProperty("User-Agent", "XDownloader-Android")
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+
+            val responseCode = connection.responseCode
+            Logger.i(TAG, "响应码: $responseCode")
+
+            if (responseCode != 200) {
+                Logger.e(TAG, "请求失败: HTTP $responseCode")
+                return@withContext null
+            }
+
             val response = connection.inputStream.bufferedReader().readText()
+            Logger.d(TAG, "响应: ${response.take(200)}")
 
             val json = JSONObject(response)
             val latestVersion = json.getString("tag_name").removePrefix("v")
-            val releaseNotes = json.getString("body")
+            val releaseNotes = json.optString("body", "")
             val assets = json.getJSONArray("assets")
             var downloadUrl = ""
 
@@ -42,6 +60,7 @@ object UpdateChecker {
             }
 
             val hasUpdate = compareVersions(latestVersion, currentVersion) > 0
+            Logger.i(TAG, "最新版本: $latestVersion, 有更新: $hasUpdate")
 
             UpdateInfo(
                 hasUpdate = hasUpdate,
@@ -50,6 +69,7 @@ object UpdateChecker {
                 releaseNotes = releaseNotes
             )
         } catch (e: Exception) {
+            Logger.e(TAG, "检查更新失败", e)
             null
         }
     }
@@ -60,20 +80,6 @@ object UpdateChecker {
             packageInfo.versionName ?: "1.0.0"
         } catch (e: Exception) {
             "1.0.0"
-        }
-    }
-
-    fun getCurrentVersionCode(context: Context): Long {
-        return try {
-            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                packageInfo.longVersionCode
-            } else {
-                @Suppress("DEPRECATION")
-                packageInfo.versionCode.toLong()
-            }
-        } catch (e: Exception) {
-            1L
         }
     }
 
@@ -92,12 +98,5 @@ object UpdateChecker {
     fun openDownloadPage(context: Context, url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
         context.startActivity(intent)
-    }
-
-    fun saveVersion(context: Context, version: String) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_VERSION, version)
-            .apply()
     }
 }
