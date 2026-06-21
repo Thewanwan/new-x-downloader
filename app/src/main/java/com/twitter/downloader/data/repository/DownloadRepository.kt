@@ -7,7 +7,6 @@ import com.twitter.downloader.data.remote.TwitterApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 
 class DownloadRepository(
