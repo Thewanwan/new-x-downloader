@@ -1,9 +1,11 @@
 package com.twitter.downloader.util
 
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -74,6 +76,72 @@ object UpdateChecker {
         }
     }
 
+    fun downloadAndInstall(context: Context, downloadUrl: String) {
+        Logger.i(TAG, "开始下载更新: $downloadUrl")
+
+        val fileName = "XDownloader.apk"
+        val request = DownloadManager.Request(Uri.parse(downloadUrl))
+            .setTitle("下载更新")
+            .setDescription("正在下载新版本...")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val downloadId = downloadManager.enqueue(request)
+
+        Logger.i(TAG, "下载任务已启动, ID: $downloadId")
+
+        // 启动一个线程监听下载完成
+        Thread {
+            var downloading = true
+            while (downloading) {
+                val query = DownloadManager.Query().setFilterById(downloadId)
+                val cursor = downloadManager.query(query)
+                if (cursor != null && cursor.moveToFirst()) {
+                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    when (status) {
+                        DownloadManager.STATUS_SUCCESSFUL -> {
+                            Logger.i(TAG, "下载完成")
+                            downloading = false
+                            installApk(context, downloadId)
+                        }
+                        DownloadManager.STATUS_FAILED -> {
+                            Logger.e(TAG, "下载失败")
+                            downloading = false
+                        }
+                    }
+                }
+                cursor?.close()
+                if (downloading) Thread.sleep(1000)
+            }
+        }.start()
+    }
+
+    private fun installApk(context: Context, downloadId: Long) {
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val uri = downloadManager.getUriForDownloadedFile(downloadId)
+
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        try {
+            context.startActivity(installIntent)
+        } catch (e: Exception) {
+            Logger.e(TAG, "安装失败", e)
+            // 尝试备用方式
+            val installIntent2 = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(installIntent2)
+        }
+    }
+
     fun getCurrentVersion(context: Context): String {
         return try {
             val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
@@ -93,10 +161,5 @@ object UpdateChecker {
             if (v1 != v2) return v1 - v2
         }
         return 0
-    }
-
-    fun openDownloadPage(context: Context, url: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        context.startActivity(intent)
     }
 }

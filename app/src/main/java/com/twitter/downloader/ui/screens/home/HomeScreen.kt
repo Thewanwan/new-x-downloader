@@ -349,10 +349,13 @@ fun HomeScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    UpdateChecker.openDownloadPage(context, updateInfo!!.downloadUrl)
+                    UpdateChecker.downloadAndInstall(context, updateInfo!!.downloadUrl)
                     showUpdateDialog = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar("正在下载更新...")
+                    }
                 }) {
-                    Text("下载更新")
+                    Text("立即更新")
                 }
             },
             dismissButton = {
