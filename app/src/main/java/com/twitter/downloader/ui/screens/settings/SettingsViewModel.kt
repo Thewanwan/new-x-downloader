@@ -1,7 +1,6 @@
 package com.twitter.downloader.ui.screens.settings
 
 import android.app.Application
-import android.net.Uri
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey

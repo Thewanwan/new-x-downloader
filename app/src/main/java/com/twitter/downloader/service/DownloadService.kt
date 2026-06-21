@@ -1,20 +1,13 @@
 package com.twitter.downloader.service
 
-import android.app.Notification
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
-import com.twitter.downloader.MainActivity
-import com.twitter.downloader.R
 import com.twitter.downloader.TwitterDownloaderApp
-import com.twitter.downloader.data.local.entity.DownloadEntity
 import com.twitter.downloader.data.local.entity.UserEntity
 import com.twitter.downloader.data.remote.TwitterApi
-import com.twitter.downloader.data.remote.MediaItem
 import com.twitter.downloader.data.remote.MediaResponse
 import com.twitter.downloader.data.repository.DownloadRepository
 import kotlinx.coroutines.CoroutineScope
