@@ -63,6 +63,9 @@ fun HomeScreen(
         }
     }
 
+    // Download progress state
+    var lastShownSuccessCount by remember { mutableIntStateOf(-1) }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -268,10 +271,9 @@ fun HomeScreen(
                         }
                     }
                     is DownloadState.Success -> {
-                        val lastShownCount = remember { mutableIntStateOf(-1) }
                         LaunchedEffect(state.count) {
-                            if (lastShownCount.intValue != state.count) {
-                                lastShownCount.intValue = state.count
+                            if (lastShownSuccessCount != state.count) {
+                                lastShownSuccessCount = state.count
                                 val message = "下载完成! 共 ${state.count} 个文件"
                                 viewModel.clearState()
                                 snackbarHostState.showSnackbar(message)
