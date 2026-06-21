@@ -17,12 +17,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.twitter.downloader.data.local.entity.UserEntity
 import com.twitter.downloader.service.DownloadService
 import com.twitter.downloader.service.DownloadState
+import com.twitter.downloader.ui.screens.settings.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onNavigateToSettings: () -> Unit,
-    viewModel: HomeViewModel = viewModel()
+    viewModel: HomeViewModel = viewModel(),
+    settingsViewModel: SettingsViewModel = viewModel()
 ) {
     val users by viewModel.users.collectAsState(initial = emptyList())
     val uiState by viewModel.uiState.collectAsState()
@@ -145,7 +147,8 @@ fun HomeScreen(
     if (showAddDialog) {
         AddUserDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { screenName, cookie ->
+            onConfirm = { screenName ->
+                val cookie = settingsViewModel.getCookieString()
                 viewModel.addUser(screenName, cookie)
                 showAddDialog = false
             }
@@ -219,10 +222,9 @@ fun UserCard(
 @Composable
 fun AddUserDialog(
     onDismiss: () -> Unit,
-    onConfirm: (String, String) -> Unit
+    onConfirm: (String) -> Unit
 ) {
     var screenName by remember { mutableStateOf("") }
-    var cookie by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -236,18 +238,17 @@ fun AddUserDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = cookie,
-                    onValueChange = { cookie = it },
-                    label = { Text("Cookie") },
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    "请先在设置中配置Cookie",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(screenName, cookie) },
-                enabled = screenName.isNotBlank() && cookie.isNotBlank()
+                onClick = { onConfirm(screenName) },
+                enabled = screenName.isNotBlank()
             ) {
                 Text("确定")
             }
