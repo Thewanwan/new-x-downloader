@@ -17,7 +17,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.twitter.downloader.data.local.entity.DownloadEntity
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 

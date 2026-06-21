@@ -1,5 +1,7 @@
 package com.twitter.downloader.data.remote
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
@@ -61,9 +63,9 @@ class TwitterApi {
         }
     }
 
-    suspend fun getUserInfo(screenName: String, cookie: String): UserInfo? {
+    suspend fun getUserInfo(screenName: String, cookie: String): UserInfo? = withContext(Dispatchers.IO) {
         val csrfToken = extractCsrfToken(cookie)
-        if (csrfToken.isEmpty()) return null
+        if (csrfToken.isEmpty()) return@withContext null
 
         val headers = buildHeaders(cookie, csrfToken, "https://x.com/$screenName")
 
@@ -78,7 +80,7 @@ class TwitterApi {
             .get()
             .build()
 
-        return client.newCall(request).execute().use { response ->
+        client.newCall(request).execute().use { response ->
             when (response.code) {
                 429 -> throw Exception("API次数已超限，请稍后再试")
                 401, 403 -> throw Exception("Cookie无效或已过期，请重新获取")
@@ -114,10 +116,10 @@ class TwitterApi {
         userId: String,
         cursor: String?,
         cookie: String
-    ): MediaResponse {
+    ): MediaResponse = withContext(Dispatchers.IO) {
         val csrfToken = extractCsrfToken(cookie)
         if (csrfToken.isEmpty()) {
-            return MediaResponse.Error("Cookie无效，请检查ct0值")
+            return@withContext MediaResponse.Error("Cookie无效，请检查ct0值")
         }
 
         val headers = buildHeaders(cookie, csrfToken, "https://x.com/")
@@ -128,7 +130,7 @@ class TwitterApi {
 
         val url = "https://twitter.com/i/api/graphql/Le6KlbilFmSu-5VltFND-Q/UserMedia?variables=$variables&features=$features"
 
-        return try {
+        try {
             val request = Request.Builder()
                 .url(urlEncode(url))
                 .apply { headers.forEach { (k, v) -> addHeader(k, v) } }
@@ -137,14 +139,14 @@ class TwitterApi {
 
             client.newCall(request).execute().use { response ->
                 when (response.code) {
-                    429 -> return MediaResponse.Error("API次数已超限，请稍后再试")
-                    401, 403 -> return MediaResponse.Error("Cookie无效或已过期")
+                    429 -> return@withContext MediaResponse.Error("API次数已超限，请稍后再试")
+                    401, 403 -> return@withContext MediaResponse.Error("Cookie无效或已过期")
                 }
 
-                val body = response.body?.string() ?: return MediaResponse.Error("获取数据失败")
+                val body = response.body?.string() ?: return@withContext MediaResponse.Error("获取数据失败")
 
                 if (body.contains("Rate limit exceeded")) {
-                    return MediaResponse.Error("API次数已超限")
+                    return@withContext MediaResponse.Error("API次数已超限")
                 }
 
                 parseMediaResponse(body)
@@ -299,7 +301,7 @@ class TwitterApi {
         return url.replace("{", "%7B").replace("}", "%7D")
     }
 
-    suspend fun downloadFile(url: String, maxRetries: Int = 3): ByteArray? {
+    suspend fun downloadFile(url: String, maxRetries: Int = 3): ByteArray? = withContext(Dispatchers.IO) {
         var lastException: Exception? = null
 
         repeat(maxRetries) { attempt ->
@@ -309,11 +311,9 @@ class TwitterApi {
                     .get()
                     .build()
 
-                return client.newCall(request).execute().use { response ->
+                return@withContext client.newCall(request).execute().use { response ->
                     when (response.code) {
-                        200 -> {
-                            response.body?.bytes()
-                        }
+                        200 -> response.body?.bytes()
                         429 -> {
                             val retryAfter = response.header("Retry-After")?.toLongOrNull() ?: 30
                             kotlinx.coroutines.delay(retryAfter * 1000)
@@ -325,29 +325,23 @@ class TwitterApi {
                 }
             } catch (e: java.net.SocketTimeoutException) {
                 lastException = e
-                if (attempt < maxRetries - 1) {
-                    kotlinx.coroutines.delay(1000L * (attempt + 1))
-                }
+                if (attempt < maxRetries - 1) kotlinx.coroutines.delay(1000L * (attempt + 1))
             } catch (e: java.net.UnknownHostException) {
-                return null
+                return@withContext null
             } catch (e: java.net.ConnectException) {
                 lastException = e
-                if (attempt < maxRetries - 1) {
-                    kotlinx.coroutines.delay(2000L * (attempt + 1))
-                }
+                if (attempt < maxRetries - 1) kotlinx.coroutines.delay(2000L * (attempt + 1))
             } catch (e: Exception) {
                 lastException = e
-                if (attempt < maxRetries - 1) {
-                    kotlinx.coroutines.delay(1000L * (attempt + 1))
-                }
+                if (attempt < maxRetries - 1) kotlinx.coroutines.delay(1000L * (attempt + 1))
             }
         }
 
         lastException?.printStackTrace()
-        return null
+        null
     }
 
-    suspend fun downloadFileTo(url: String, outputFile: File, maxRetries: Int = 3): Boolean {
+    suspend fun downloadFileTo(url: String, outputFile: File, maxRetries: Int = 3): Boolean = withContext(Dispatchers.IO) {
         var lastException: Exception? = null
 
         repeat(maxRetries) { attempt ->
@@ -357,7 +351,7 @@ class TwitterApi {
                     .get()
                     .build()
 
-                return client.newCall(request).execute().use { response ->
+                return@withContext client.newCall(request).execute().use { response ->
                     when (response.code) {
                         200 -> {
                             val body = response.body ?: return@use false
@@ -379,26 +373,20 @@ class TwitterApi {
                 }
             } catch (e: java.net.SocketTimeoutException) {
                 lastException = e
-                if (attempt < maxRetries - 1) {
-                    kotlinx.coroutines.delay(1000L * (attempt + 1))
-                }
+                if (attempt < maxRetries - 1) kotlinx.coroutines.delay(1000L * (attempt + 1))
             } catch (e: java.net.UnknownHostException) {
-                return false
+                return@withContext false
             } catch (e: java.net.ConnectException) {
                 lastException = e
-                if (attempt < maxRetries - 1) {
-                    kotlinx.coroutines.delay(2000L * (attempt + 1))
-                }
+                if (attempt < maxRetries - 1) kotlinx.coroutines.delay(2000L * (attempt + 1))
             } catch (e: Exception) {
                 lastException = e
-                if (attempt < maxRetries - 1) {
-                    kotlinx.coroutines.delay(1000L * (attempt + 1))
-                }
+                if (attempt < maxRetries - 1) kotlinx.coroutines.delay(1000L * (attempt + 1))
             }
         }
 
         lastException?.printStackTrace()
-        return false
+        false
     }
 }
 

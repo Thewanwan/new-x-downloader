@@ -1,6 +1,5 @@
 package com.twitter.downloader.ui.screens.logs
 
-import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,7 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.twitter.downloader.util.Logger
-import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

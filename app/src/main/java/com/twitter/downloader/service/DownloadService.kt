@@ -28,7 +28,7 @@ import java.io.File
 
 class DownloadService : Service() {
 
-    private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private val scope = CoroutineScope(Dispatchers.IO + Job())
     private lateinit var api: TwitterApi
     private lateinit var repository: DownloadRepository
     private var currentJob: Job? = null
