@@ -262,8 +262,9 @@ fun HomeScreen(
                     }
                     is DownloadState.Success -> {
                         LaunchedEffect(state) {
-                            snackbarHostState.showSnackbar("下载完成! 共 ${state.count} 个文件")
+                            val message = "下载完成! 共 ${state.count} 个文件"
                             viewModel.clearState()
+                            snackbarHostState.showSnackbar(message)
                         }
                     }
                     is DownloadState.Error -> {
