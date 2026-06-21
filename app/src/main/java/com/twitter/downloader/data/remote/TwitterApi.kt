@@ -199,7 +199,8 @@ class TwitterApi {
                     return@withContext MediaResponse.Error("API次数已超限")
                 }
 
-                parseMediaResponse(body)
+                Logger.d("API", "getUserMedia响应: ${body.take(500)}")
+                parseMediaResponse(body, isFirstPage = cursor == null)
             }
         } catch (e: java.net.SocketTimeoutException) {
             MediaResponse.Error("网络超时，请检查网络连接")
@@ -213,108 +214,148 @@ class TwitterApi {
         }
     }
 
-    private fun parseMediaResponse(body: String): MediaResponse {
+    private fun parseMediaResponse(body: String, isFirstPage: Boolean = true): MediaResponse {
         return try {
             val data = json.parseToJsonElement(body).jsonObject
-            val instructions = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
+            val timeline = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
                 ?.get("timeline_v2")?.jsonObject?.get("timeline")?.jsonObject
-                ?.get("instructions")?.jsonArray
-                ?: return MediaResponse.Error("数据解析失败")
+                ?: return MediaResponse.Error("数据解析失败: 无法找到timeline")
+
+            val instructions = timeline["instructions"]?.jsonArray
+                ?: return MediaResponse.Error("数据解析失败: 无法找到instructions")
 
             if (instructions.isEmpty()) {
                 return MediaResponse.Success(emptyList(), null)
             }
 
-            val entries = instructions.last().jsonObject?.get("entries")?.jsonArray
-                ?: return MediaResponse.Success(emptyList(), null)
+            Logger.d("API", "instructions数量: ${instructions.size}, isFirstPage: $isFirstPage")
 
             val mediaList = mutableListOf<MediaItem>()
             var nextCursor: String? = null
 
-            for (entry in entries) {
-                val entryObj = entry.jsonObject
-                val entryId = entryObj["entryId"]?.jsonPrimitive?.content ?: continue
+            // 第一页: entries[-1] 包含cursor-bottom, entries[0].content.items 包含推文
+            // 后续页: entries[0].moduleItems 包含推文
+            if (isFirstPage) {
+                val lastEntry = instructions.last().jsonObject
+                val entries = lastEntry["entries"]?.jsonArray
+                    ?: return MediaResponse.Success(emptyList(), null)
 
-                if (entryId.contains("cursor-bottom")) {
-                    nextCursor = entryObj["content"]?.jsonObject?.get("value")?.jsonPrimitive?.content
-                    continue
+                // 获取cursor
+                for (entry in entries) {
+                    val entryObj = entry.jsonObject
+                    val entryId = entryObj["entryId"]?.jsonPrimitive?.content ?: continue
+                    if (entryId.contains("cursor-bottom")) {
+                        nextCursor = entryObj["content"]?.jsonObject?.get("value")?.jsonPrimitive?.content
+                    }
                 }
 
-                if (!entryId.contains("tweet")) continue
-                if (entryId.contains("promoted")) continue
-
-                try {
-                    val itemContent = entryObj["content"]?.jsonObject?.get("itemContent")?.jsonObject
-                        ?: continue
-                    val tweetResult = itemContent["tweet_results"]?.jsonObject?.get("result")?.jsonObject
-                        ?: continue
-
-                    val legacy = tweetResult["tweet"]?.jsonObject?.get("legacy")?.jsonObject
-                        ?: tweetResult["legacy"]?.jsonObject
-                        ?: continue
-
-                    val editControl = tweetResult["tweet"]?.jsonObject?.get("edit_control")?.jsonObject
-                        ?: tweetResult["edit_control"]?.jsonObject
-                        ?: continue
-
-                    val tweetTime = safeGetLong(editControl, "editable_until_msecs") - 3600000
-                    val tweetId = safeGetString(legacy, "id_str")
-                    val tweetContent = safeGetString(legacy, "full_text")
-                    val favoriteCount = safeGetInt(legacy, "favorite_count")
-                    val retweetCount = safeGetInt(legacy, "retweet_count")
-                    val replyCount = safeGetInt(legacy, "reply_count")
-
-                    val userResult = tweetResult["core"]?.jsonObject?.get("user_results")?.jsonObject?.get("result")?.jsonObject
-                    val userLegacy = userResult?.get("legacy")?.jsonObject
-                    val userName = safeGetString(userLegacy, "name")
-                    val userScreenName = safeGetString(userLegacy, "screen_name")
-
-                    if (legacy.containsKey("extended_entities")) {
-                        val mediaArray = legacy["extended_entities"]?.jsonObject?.get("media")?.jsonArray
-                            ?: continue
-
-                        for (media in mediaArray) {
-                            val mediaObj = media.jsonObject
-                            val mediaUrl: String
-                            val mediaType: String
-
-                            if (mediaObj.containsKey("video_info")) {
-                                val variants = mediaObj["video_info"]?.jsonObject?.get("variants")?.jsonArray
-                                    ?: continue
-                                mediaUrl = getHighestQualityVideo(variants)
-                                mediaType = "video"
-                            } else {
-                                mediaUrl = mediaObj["media_url_https"]?.jsonPrimitive?.content ?: continue
-                                mediaType = "image"
-                            }
-
-                            if (mediaUrl.isNotEmpty()) {
-                                mediaList.add(
-                                    MediaItem(
-                                        mediaUrl = mediaUrl,
-                                        mediaType = mediaType,
-                                        tweetId = tweetId,
-                                        tweetTime = tweetTime,
-                                        tweetContent = tweetContent,
-                                        userName = userName,
-                                        userScreenName = "@$userScreenName",
-                                        favoriteCount = favoriteCount,
-                                        retweetCount = retweetCount,
-                                        replyCount = replyCount
-                                    )
-                                )
-                            }
+                // 第一页的推文在 entries[0].content.items
+                if (entries.size > 0) {
+                    val firstEntry = entries[0].jsonObject
+                    val contentItems = firstEntry["content"]?.jsonObject?.get("items")?.jsonArray
+                    if (contentItems != null) {
+                        for (item in contentItems) {
+                            parseTweetItem(item, mediaList)
                         }
                     }
-                } catch (e: Exception) {
-                    continue
+                }
+            } else {
+                // 后续页: instructions[0].moduleItems
+                val firstInstruction = instructions[0].jsonObject
+
+                // 获取cursor
+                val entries = firstInstruction["entries"]?.jsonArray
+                if (entries != null) {
+                    for (entry in entries) {
+                        val entryObj = entry.jsonObject
+                        val entryId = entryObj["entryId"]?.jsonPrimitive?.content ?: continue
+                        if (entryId.contains("cursor-bottom")) {
+                            nextCursor = entryObj["entry"]?.jsonObject?.get("content")?.jsonObject?.get("value")?.jsonPrimitive?.content
+                        }
+                    }
+                }
+
+                val moduleItems = firstInstruction["moduleItems"]?.jsonArray
+                if (moduleItems != null) {
+                    for (item in moduleItems) {
+                        parseTweetItem(item, mediaList)
+                    }
                 }
             }
 
+            Logger.d("API", "解析到 ${mediaList.size} 个媒体, nextCursor: ${nextCursor?.take(20)}...")
             MediaResponse.Success(mediaList, nextCursor)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Logger.e("API", "解析异常: ${e.message}", e)
             MediaResponse.Error("数据解析失败: ${e.message}")
+        }
+    }
+
+    private fun parseTweetItem(item: kotlinx.serialization.json.JsonElement, mediaList: MutableList<MediaItem>) {
+        try {
+            val tweetResult = item.jsonObject["item"]?.jsonObject?.get("itemContent")?.jsonObject
+                ?.get("tweet_results")?.jsonObject?.get("result")?.jsonObject
+                ?: return
+
+            val legacy = tweetResult["tweet"]?.jsonObject?.get("legacy")?.jsonObject
+                ?: tweetResult["legacy"]?.jsonObject
+                ?: return
+
+            val editControl = tweetResult["tweet"]?.jsonObject?.get("edit_control")?.jsonObject
+                ?: tweetResult["edit_control"]?.jsonObject
+                ?: return
+
+            val tweetTime = safeGetLong(editControl, "editable_until_msecs") - 3600000
+            val tweetId = safeGetString(legacy, "id_str")
+            val tweetContent = safeGetString(legacy, "full_text")
+            val favoriteCount = safeGetInt(legacy, "favorite_count")
+            val retweetCount = safeGetInt(legacy, "retweet_count")
+            val replyCount = safeGetInt(legacy, "reply_count")
+
+            val userResult = tweetResult["core"]?.jsonObject?.get("user_results")?.jsonObject?.get("result")?.jsonObject
+            val userLegacy = userResult?.get("legacy")?.jsonObject
+            val userName = safeGetString(userLegacy, "name")
+            val userScreenName = safeGetString(userLegacy, "screen_name")
+
+            if (legacy.containsKey("extended_entities")) {
+                val mediaArray = legacy["extended_entities"]?.jsonObject?.get("media")?.jsonArray
+                    ?: return
+
+                for (media in mediaArray) {
+                    val mediaObj = media.jsonObject
+                    val mediaUrl: String
+                    val mediaType: String
+
+                    if (mediaObj.containsKey("video_info")) {
+                        val variants = mediaObj["video_info"]?.jsonObject?.get("variants")?.jsonArray
+                            ?: continue
+                        mediaUrl = getHighestQualityVideo(variants)
+                        mediaType = "video"
+                    } else {
+                        mediaUrl = mediaObj["media_url_https"]?.jsonPrimitive?.content ?: continue
+                        mediaType = "image"
+                    }
+
+                    if (mediaUrl.isNotEmpty()) {
+                        mediaList.add(
+                            MediaItem(
+                                mediaUrl = mediaUrl,
+                                mediaType = mediaType,
+                                tweetId = tweetId,
+                                tweetTime = tweetTime,
+                                tweetContent = tweetContent,
+                                userName = userName,
+                                userScreenName = "@$userScreenName",
+                                favoriteCount = favoriteCount,
+                                retweetCount = retweetCount,
+                                replyCount = replyCount
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Logger.d("API", "跳过一条推文: ${e.message}")
         }
     }
 
