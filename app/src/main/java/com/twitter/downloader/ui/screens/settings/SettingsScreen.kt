@@ -2,6 +2,7 @@ package com.twitter.downloader.ui.screens.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -29,6 +30,11 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: SettingsViewModel = viewModel()
 ) {
+    // Handle predictive back gesture
+    BackHandler {
+        onNavigateBack()
+    }
+
     val context = LocalContext.current
 
     val authToken by viewModel.authToken.collectAsState()

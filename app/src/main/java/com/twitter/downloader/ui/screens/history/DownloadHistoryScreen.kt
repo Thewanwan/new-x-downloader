@@ -1,5 +1,6 @@
 package com.twitter.downloader.ui.screens.history
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +29,10 @@ fun DownloadHistoryScreen(
     onNavigateBack: () -> Unit,
     downloadDao: com.twitter.downloader.data.local.dao.DownloadDao
 ) {
+    BackHandler {
+        onNavigateBack()
+    }
+
     val downloads by downloadDao.getDownloadsByUser(userId).collectAsState(initial = emptyList())
 
     Scaffold(

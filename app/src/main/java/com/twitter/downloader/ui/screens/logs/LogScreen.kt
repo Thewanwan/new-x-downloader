@@ -1,6 +1,7 @@
 package com.twitter.downloader.ui.screens.logs
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +27,10 @@ import java.io.File
 fun LogScreen(
     onNavigateBack: () -> Unit
 ) {
+    BackHandler {
+        onNavigateBack()
+    }
+
     val context = LocalContext.current
     var logs by remember { mutableStateOf(Logger.getLogs()) }
     var showClearDialog by remember { mutableStateOf(false) }

@@ -8,13 +8,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
 import com.twitter.downloader.ui.navigation.NavGraph
 import com.twitter.downloader.ui.theme.NewXDownloaderTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Enable edge-to-edge display (Android 15+)
         enableEdgeToEdge()
+
+        // Allow drawing behind system bars
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         setContent {
             NewXDownloaderTheme {
                 Surface(
