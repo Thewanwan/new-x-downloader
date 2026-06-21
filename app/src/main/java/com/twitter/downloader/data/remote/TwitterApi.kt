@@ -1,6 +1,7 @@
 package com.twitter.downloader.data.remote
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -34,8 +35,34 @@ class TwitterApi {
         return regex.find(cookie)?.groupValues?.get(1) ?: ""
     }
 
+    private fun getJsonString(obj: kotlinx.serialization.json.JsonObject?, key: String): String {
+        return try {
+            obj?.get(key)?.jsonPrimitive?.content ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun getJsonLong(obj: kotlinx.serialization.json.JsonObject?, key: String): Long {
+        return try {
+            obj?.get(key)?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
+    private fun getJsonInt(obj: kotlinx.serialization.json.JsonObject?, key: String): Int {
+        return try {
+            obj?.get(key)?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
     suspend fun getUserInfo(screenName: String, cookie: String): UserInfo? {
         val csrfToken = extractCsrfToken(cookie)
+        if (csrfToken.isEmpty()) return null
+
         val headers = buildHeaders(cookie, csrfToken, "https://x.com/$screenName")
 
         val variables = """{"screen_name":"$screenName","withSafetyModeUserFields":false}"""
@@ -51,22 +78,34 @@ class TwitterApi {
                 .build()
 
             val response = client.newCall(request).execute()
+
+            when (response.code) {
+                429 -> throw Exception("API次数已超限，请稍后再试")
+                401, 403 -> throw Exception("Cookie无效或已过期，请重新获取")
+                404 -> throw Exception("用户不存在: @$screenName")
+            }
+
             val body = response.body?.string() ?: return null
 
+            if (body.contains("Rate limit exceeded")) {
+                throw Exception("API次数已超限")
+            }
+
             val data = json.parseToJsonElement(body).jsonObject
-            val user = data["data"]!!.jsonObject["user"]!!.jsonObject["result"]!!.jsonObject
-            val legacy = user["legacy"]!!.jsonObject
+            val userResult = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
+                ?: return null
+            val legacy = userResult["legacy"]?.jsonObject ?: return null
 
             UserInfo(
-                restId = user["rest_id"]!!.jsonPrimitive.content,
+                restId = getJsonString(userResult, "rest_id"),
                 screenName = screenName,
-                name = legacy["name"]!!.jsonPrimitive.content,
-                statusesCount = legacy["statuses_count"]!!.jsonPrimitive.content.toIntOrNull() ?: 0,
-                mediaCount = legacy["media_count"]!!.jsonPrimitive.content.toIntOrNull() ?: 0
+                name = getJsonString(legacy, "name"),
+                statusesCount = getJsonInt(legacy, "statuses_count"),
+                mediaCount = getJsonInt(legacy, "media_count")
             )
         } catch (e: Exception) {
             e.printStackTrace()
-            null
+            throw e
         }
     }
 
@@ -74,8 +113,12 @@ class TwitterApi {
         userId: String,
         cursor: String?,
         cookie: String
-    ): MediaResponse? {
+    ): MediaResponse {
         val csrfToken = extractCsrfToken(cookie)
+        if (csrfToken.isEmpty()) {
+            return MediaResponse.Error("Cookie无效，请检查ct0值")
+        }
+
         val headers = buildHeaders(cookie, csrfToken, "https://x.com/")
 
         val cursorPart = if (cursor != null) ""","cursor":"$cursor",""" else ""
@@ -92,124 +135,160 @@ class TwitterApi {
                 .build()
 
             val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: return null
+
+            when (response.code) {
+                429 -> return MediaResponse.Error("API次数已超限，请稍后再试")
+                401, 403 -> return MediaResponse.Error("Cookie无效或已过期")
+            }
+
+            val body = response.body?.string() ?: return MediaResponse.Error("获取数据失败")
 
             if (body.contains("Rate limit exceeded")) {
                 return MediaResponse.Error("API次数已超限")
             }
 
             parseMediaResponse(body)
+        } catch (e: java.net.SocketTimeoutException) {
+            MediaResponse.Error("网络超时，请检查网络连接")
+        } catch (e: java.net.UnknownHostException) {
+            MediaResponse.Error("无法解析主机，请检查网络连接")
+        } catch (e: java.net.ConnectException) {
+            MediaResponse.Error("连接失败，请检查网络连接")
         } catch (e: Exception) {
             e.printStackTrace()
-            MediaResponse.Error(e.message ?: "Unknown error")
+            MediaResponse.Error(e.message ?: "未知错误")
         }
     }
 
     private fun parseMediaResponse(body: String): MediaResponse {
-        val data = json.parseToJsonElement(body).jsonObject
-        val instructions = data["data"]!!.jsonObject["user"]!!.jsonObject["result"]!!
-            .jsonObject["timeline_v2"]!!.jsonObject["timeline"]!!
-            .jsonObject["instructions"]!!.jsonArray
+        return try {
+            val data = json.parseToJsonElement(body).jsonObject
+            val instructions = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
+                ?.get("timeline_v2")?.jsonObject?.get("timeline")?.jsonObject
+                ?.get("instructions")?.jsonArray
+                ?: return MediaResponse.Error("数据解析失败")
 
-        val entries = instructions.last().jsonObject["entries"]!!.jsonArray
-
-        val mediaList = mutableListOf<MediaItem>()
-        var nextCursor: String? = null
-
-        for (entry in entries) {
-            val entryObj = entry.jsonObject
-            val entryId = entryObj["entryId"]?.jsonPrimitive?.content ?: continue
-
-            if (entryId.contains("cursor-bottom")) {
-                nextCursor = entryObj["content"]!!.jsonObject["value"]?.jsonPrimitive?.content
-                continue
+            if (instructions.isEmpty()) {
+                return MediaResponse.Success(emptyList(), null)
             }
 
-            if (!entryId.contains("tweet")) continue
-            if (entryId.contains("promoted")) continue
+            val entries = instructions.last().jsonObject?.get("entries")?.jsonArray
+                ?: return MediaResponse.Success(emptyList(), null)
 
-            try {
-                val itemContent = entryObj["content"]!!.jsonObject["itemContent"]!!.jsonObject
-                val tweetResult = itemContent["tweet_results"]!!.jsonObject["result"]!!.jsonObject
+            val mediaList = mutableListOf<MediaItem>()
+            var nextCursor: String? = null
 
-                val legacy = if (tweetResult.containsKey("tweet")) {
-                    tweetResult["tweet"]!!.jsonObject["legacy"]!!.jsonObject
-                } else {
-                    tweetResult["legacy"]!!.jsonObject
+            for (entry in entries) {
+                val entryObj = entry.jsonObject
+                val entryId = entryObj["entryId"]?.jsonPrimitive?.content ?: continue
+
+                if (entryId.contains("cursor-bottom")) {
+                    nextCursor = entryObj["content"]?.jsonObject?.get("value")?.jsonPrimitive?.content
+                    continue
                 }
 
-                val editControl = if (tweetResult.containsKey("tweet")) {
-                    tweetResult["tweet"]!!.jsonObject["edit_control"]!!.jsonObject
-                } else {
-                    tweetResult["edit_control"]!!.jsonObject
-                }
+                if (!entryId.contains("tweet")) continue
+                if (entryId.contains("promoted")) continue
 
-                val tweetTime = (editControl["editable_until_msecs"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L) - 3600000
-                val tweetId = legacy["id_str"]?.jsonPrimitive?.content ?: ""
-                val tweetContent = legacy["full_text"]?.jsonPrimitive?.content ?: ""
-                val favoriteCount = legacy["favorite_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                val retweetCount = legacy["retweet_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                val replyCount = legacy["reply_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                try {
+                    val itemContent = entryObj["content"]?.jsonObject?.get("itemContent")?.jsonObject
+                        ?: continue
+                    val tweetResult = itemContent["tweet_results"]?.jsonObject?.get("result")?.jsonObject
+                        ?: continue
 
-                val userResult = tweetResult["core"]?.jsonObject?.get("user_results")?.jsonObject?.get("result")?.jsonObject
-                val userLegacy = userResult?.get("legacy")?.jsonObject
-                val userName = userLegacy?.get("name")?.jsonPrimitive?.content ?: ""
-                val userScreenName = userLegacy?.get("screen_name")?.jsonPrimitive?.content ?: ""
+                    val legacy = tweetResult["tweet"]?.jsonObject?.get("legacy")?.jsonObject
+                        ?: tweetResult["legacy"]?.jsonObject
+                        ?: continue
 
-                if (legacy.containsKey("extended_entities")) {
-                    val mediaArray = legacy["extended_entities"]!!.jsonObject["media"]!!.jsonArray
+                    val editControl = tweetResult["tweet"]?.jsonObject?.get("edit_control")?.jsonObject
+                        ?: tweetResult["edit_control"]?.jsonObject
+                        ?: continue
 
-                    for (media in mediaArray) {
-                        val mediaObj = media.jsonObject
-                        val mediaUrl: String
-                        val mediaType: String
+                    val tweetTime = getJsonLong(editControl, "editable_until_msecs") - 3600000
+                    val tweetId = getJsonString(legacy, "id_str")
+                    val tweetContent = getJsonString(legacy, "full_text")
+                    val favoriteCount = getJsonInt(legacy, "favorite_count")
+                    val retweetCount = getJsonInt(legacy, "retweet_count")
+                    val replyCount = getJsonInt(legacy, "reply_count")
 
-                        if (mediaObj.containsKey("video_info")) {
-                            mediaUrl = getHighestQualityVideo(mediaObj["video_info"]!!.jsonObject["variants"]!!.jsonArray)
-                            mediaType = "video"
-                        } else {
-                            mediaUrl = mediaObj["media_url_https"]!!.jsonPrimitive.content
-                            mediaType = "image"
+                    val userResult = tweetResult["core"]?.jsonObject?.get("user_results")?.jsonObject?.get("result")?.jsonObject
+                    val userLegacy = userResult?.get("legacy")?.jsonObject
+                    val userName = getJsonString(userLegacy, "name")
+                    val userScreenName = getJsonString(userLegacy, "screen_name")
+
+                    if (legacy.containsKey("extended_entities")) {
+                        val mediaArray = legacy["extended_entities"]?.jsonObject?.get("media")?.jsonArray
+                            ?: continue
+
+                        for (media in mediaArray) {
+                            val mediaObj = media.jsonObject
+                            val mediaUrl: String
+                            val mediaType: String
+
+                            if (mediaObj.containsKey("video_info")) {
+                                val variants = mediaObj["video_info"]?.jsonObject?.get("variants")?.jsonArray
+                                    ?: continue
+                                mediaUrl = getHighestQualityVideo(variants)
+                                mediaType = "video"
+                            } else {
+                                mediaUrl = mediaObj["media_url_https"]?.jsonPrimitive?.content ?: continue
+                                mediaType = "image"
+                            }
+
+                            if (mediaUrl.isNotEmpty()) {
+                                mediaList.add(
+                                    MediaItem(
+                                        mediaUrl = mediaUrl,
+                                        mediaType = mediaType,
+                                        tweetId = tweetId,
+                                        tweetTime = tweetTime,
+                                        tweetContent = tweetContent,
+                                        userName = userName,
+                                        userScreenName = "@$userScreenName",
+                                        favoriteCount = favoriteCount,
+                                        retweetCount = retweetCount,
+                                        replyCount = replyCount
+                                    )
+                                )
+                            }
                         }
-
-                        mediaList.add(
-                            MediaItem(
-                                mediaUrl = mediaUrl,
-                                mediaType = mediaType,
-                                tweetId = tweetId,
-                                tweetTime = tweetTime,
-                                tweetContent = tweetContent,
-                                userName = userName,
-                                userScreenName = "@$userScreenName",
-                                favoriteCount = favoriteCount,
-                                retweetCount = retweetCount,
-                                replyCount = replyCount
-                            )
-                        )
                     }
+                } catch (e: Exception) {
+                    continue
                 }
-            } catch (e: Exception) {
-                continue
             }
-        }
 
-        return MediaResponse.Success(mediaList, nextCursor)
+            MediaResponse.Success(mediaList, nextCursor)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            MediaResponse.Error("数据解析失败: ${e.message}")
+        }
     }
 
-    private fun getHighestQualityVideo(variants: kotlinx.serialization.json.JsonArray): String {
+    private fun getHighestQualityVideo(variants: JsonArray): String {
+        if (variants.isEmpty()) return ""
+
         if (variants.size == 1) {
-            return variants[0].jsonObject["url"]?.jsonPrimitive?.content ?: ""
+            return try {
+                variants[0].jsonObject["url"]?.jsonPrimitive?.content ?: ""
+            } catch (e: Exception) {
+                ""
+            }
         }
 
         var maxBitrate = 0L
         var highestUrl = ""
 
         for (variant in variants) {
-            val obj = variant.jsonObject
-            val bitrate = obj["bitrate"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
-            if (bitrate > maxBitrate) {
-                maxBitrate = bitrate
-                highestUrl = obj["url"]?.jsonPrimitive?.content ?: ""
+            try {
+                val obj = variant.jsonObject
+                val bitrate = obj["bitrate"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                if (bitrate > maxBitrate) {
+                    maxBitrate = bitrate
+                    highestUrl = obj["url"]?.jsonPrimitive?.content ?: ""
+                }
+            } catch (e: Exception) {
+                continue
             }
         }
         return highestUrl
@@ -219,23 +298,56 @@ class TwitterApi {
         return url.replace("{", "%7B").replace("}", "%7D")
     }
 
-    suspend fun downloadFile(url: String): ByteArray? {
-        return try {
-            val request = Request.Builder()
-                .url(url)
-                .get()
-                .build()
+    suspend fun downloadFile(url: String, maxRetries: Int = 3): ByteArray? {
+        var lastException: Exception? = null
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                response.body?.bytes()
-            } else {
-                null
+        repeat(maxRetries) { attempt ->
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .get()
+                    .build()
+
+                val response = client.newCall(request).execute()
+
+                when (response.code) {
+                    200 -> {
+                        val bytes = response.body?.bytes()
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            return bytes
+                        }
+                    }
+                    429 -> {
+                        val retryAfter = response.header("Retry-After")?.toLongOrNull() ?: 30
+                        Thread.sleep(retryAfter * 1000)
+                        return@repeat
+                    }
+                    404 -> {
+                        return null
+                    }
+                }
+            } catch (e: java.net.SocketTimeoutException) {
+                lastException = e
+                if (attempt < maxRetries - 1) {
+                    Thread.sleep(1000L * (attempt + 1))
+                }
+            } catch (e: java.net.UnknownHostException) {
+                return null
+            } catch (e: java.net.ConnectException) {
+                lastException = e
+                if (attempt < maxRetries - 1) {
+                    Thread.sleep(2000L * (attempt + 1))
+                }
+            } catch (e: Exception) {
+                lastException = e
+                if (attempt < maxRetries - 1) {
+                    Thread.sleep(1000L * (attempt + 1))
+                }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
         }
+
+        lastException?.printStackTrace()
+        return null
     }
 }
 

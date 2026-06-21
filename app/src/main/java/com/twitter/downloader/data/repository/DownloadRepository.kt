@@ -7,6 +7,7 @@ import com.twitter.downloader.data.remote.TwitterApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 class DownloadRepository(
     private val downloadDao: DownloadDao,
@@ -14,11 +15,21 @@ class DownloadRepository(
 ) {
 
     suspend fun getDownloadedUrls(userId: Long): Set<String> {
-        return downloadDao.getMediaUrlsByUser(userId).toSet()
+        return try {
+            downloadDao.getMediaUrlsByUser(userId).toSet()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptySet()
+        }
     }
 
     suspend fun getDownloadCount(userId: Long): Int {
-        return downloadDao.getCountByUser(userId)
+        return try {
+            downloadDao.getCountByUser(userId)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            0
+        }
     }
 
     suspend fun downloadMedia(
@@ -31,21 +42,43 @@ class DownloadRepository(
             val fileName = generateFileName(item)
             val file = File(saveDir, fileName)
 
-            val bytes = api.downloadFile(item.mediaUrl) ?: return@withContext false
-            file.writeBytes(bytes)
+            if (file.exists() && file.length() > 0) {
+                onProgress(fileName)
+                return@withContext true
+            }
 
-            downloadDao.insertDownload(
-                DownloadEntity(
-                    userId = userId,
-                    mediaUrl = item.mediaUrl,
-                    mediaType = item.mediaType,
-                    tweetId = item.tweetId,
-                    tweetTime = item.tweetTime,
-                    tweetContent = item.tweetContent,
-                    filePath = file.absolutePath,
-                    status = DownloadEntity.STATUS_DOWNLOADED
+            val bytes = api.downloadFile(item.mediaUrl) ?: return@withContext false
+
+            val tempFile = File(saveDir, "$fileName.tmp")
+            try {
+                tempFile.writeBytes(bytes)
+                if (file.exists()) file.delete()
+                tempFile.renameTo(file)
+            } catch (e: IOException) {
+                tempFile.delete()
+                throw e
+            }
+
+            if (!file.exists() || file.length() == 0L) {
+                return@withContext false
+            }
+
+            try {
+                downloadDao.insertDownload(
+                    DownloadEntity(
+                        userId = userId,
+                        mediaUrl = item.mediaUrl,
+                        mediaType = item.mediaType,
+                        tweetId = item.tweetId,
+                        tweetTime = item.tweetTime,
+                        tweetContent = item.tweetContent,
+                        filePath = file.absolutePath,
+                        status = DownloadEntity.STATUS_DOWNLOADED
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
 
             onProgress(fileName)
             true
@@ -56,7 +89,11 @@ class DownloadRepository(
     }
 
     suspend fun deleteDownloadsForUser(userId: Long) {
-        downloadDao.deleteDownloadsByUser(userId)
+        try {
+            downloadDao.deleteDownloadsByUser(userId)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun generateFileName(item: MediaItem): String {
@@ -64,6 +101,7 @@ class DownloadRepository(
             .format(java.util.Date(item.tweetTime))
         val hash = item.mediaUrl.hashCode().toString(16).take(4)
         val ext = if (item.mediaType == "video") "mp4" else "jpg"
-        return "${dateStr}_${item.userScreenName}_$hash.$ext"
+        val safeScreenName = item.userScreenName.replace(Regex("[^a-zA-Z0-9_]"), "_")
+        return "${dateStr}_${safeScreenName}_$hash.$ext"
     }
 }
