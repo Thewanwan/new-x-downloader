@@ -72,10 +72,13 @@ object Logger {
     fun clearLogs() {
         synchronized(lock) {
             logFile?.delete()
-            logFile = null
             isInitialized = false
         }
     }
 
     fun getLogFile(): File? = logFile
+
+    fun reinit(context: Context) {
+        init(context)
+    }
 }

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -90,31 +91,6 @@ object UpdateChecker {
         val downloadId = downloadManager.enqueue(request)
 
         Logger.i(TAG, "下载任务已启动, ID: $downloadId")
-
-        // 启动一个线程监听下载完成
-        Thread {
-            var downloading = true
-            while (downloading) {
-                val query = DownloadManager.Query().setFilterById(downloadId)
-                val cursor = downloadManager.query(query)
-                if (cursor != null && cursor.moveToFirst()) {
-                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    when (status) {
-                        DownloadManager.STATUS_SUCCESSFUL -> {
-                            Logger.i(TAG, "下载完成")
-                            downloading = false
-                            installApk(context, downloadId)
-                        }
-                        DownloadManager.STATUS_FAILED -> {
-                            Logger.e(TAG, "下载失败")
-                            downloading = false
-                        }
-                    }
-                }
-                cursor?.close()
-                if (downloading) Thread.sleep(1000)
-            }
-        }.start()
     }
 
     private fun installApk(context: Context, downloadId: Long) {

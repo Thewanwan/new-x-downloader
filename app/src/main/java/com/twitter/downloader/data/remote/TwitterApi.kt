@@ -13,7 +13,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class TwitterApi {
@@ -396,8 +395,6 @@ class TwitterApi {
         }.build()
         return httpUrl.toString()
     }
-
-    private fun urlEncode(url: String): String = url
 
     suspend fun downloadFile(url: String, maxRetries: Int = 3): ByteArray? = withContext(Dispatchers.IO) {
         var lastException: Exception? = null

@@ -122,7 +122,8 @@ fun LogScreen(
             confirmButton = {
                 TextButton(onClick = {
                     Logger.clearLogs()
-                    logs = emptyList()
+                    Logger.reinit(context)
+                    logs = Logger.getLogs()
                     showClearDialog = false
                 }) { Text("确定") }
             },
