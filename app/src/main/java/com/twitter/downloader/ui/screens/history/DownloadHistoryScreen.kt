@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -25,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.twitter.downloader.data.local.entity.DownloadEntity
 import java.io.File
 import java.text.SimpleDateFormat
@@ -126,16 +126,20 @@ fun DownloadHistoryItem(download: DownloadEntity) {
             return
         }
 
-        val uri = Uri.fromFile(file)
-        val mimeType = if (download.mediaType == "video") "video/*" else "image/*"
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, mimeType)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
         try {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val mimeType = if (download.mediaType == "video") "video/*" else "image/*"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             context.startActivity(intent)
         } catch (e: Exception) {
-            Toast.makeText(context, "无法打开文件", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 

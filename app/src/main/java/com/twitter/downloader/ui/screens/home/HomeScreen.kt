@@ -337,7 +337,10 @@ fun HomeScreen(
                             UserCard(
                                 user = user,
                                 onDownload = { showDownloadDialog = user },
-                                onHistory = { onNavigateToHistory(user.id, user.screenName) },
+                                onHistory = {
+                                    DownloadService.clearState()
+                                    onNavigateToHistory(user.id, user.screenName)
+                                },
                                 onDelete = { viewModel.deleteUser(user.id) }
                             )
                         }

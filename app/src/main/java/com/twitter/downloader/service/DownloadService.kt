@@ -315,6 +315,10 @@ class DownloadService : Service() {
         private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
         val downloadState: StateFlow<DownloadState> = _downloadState
 
+        fun clearState() {
+            _downloadState.value = DownloadState.Idle
+        }
+
         fun start(context: Context, user: UserEntity, incremental: Boolean) {
             val intent = Intent(context, DownloadService::class.java).apply {
                 action = ACTION_START
