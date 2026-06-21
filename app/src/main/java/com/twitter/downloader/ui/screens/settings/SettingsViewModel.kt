@@ -94,6 +94,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun getCookieString(): String = "auth_token=${_authToken.value}; ct0=${_ct0.value};"
 
+    fun isCookieConfigured(): Boolean = _authToken.value.isNotBlank() && _ct0.value.isNotBlank()
+
     fun updateAuthToken(value: String) {
         _authToken.value = value
         viewModelScope.launch { dataStore.edit { it[AUTH_TOKEN_KEY] = value } }

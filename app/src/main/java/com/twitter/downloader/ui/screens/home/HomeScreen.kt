@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.twitter.downloader.data.local.entity.UserEntity
@@ -27,6 +28,8 @@ import com.twitter.downloader.ui.screens.settings.SettingsViewModel
 @Composable
 fun HomeScreen(
     onNavigateToSettings: () -> Unit,
+    onNavigateToLogs: () -> Unit = {},
+    onNavigateToHistory: (Long, String) -> Unit = { _, _ -> },
     viewModel: HomeViewModel = viewModel(),
     settingsViewModel: SettingsViewModel = viewModel()
 ) {
@@ -36,8 +39,11 @@ fun HomeScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showDownloadDialog by remember { mutableStateOf<UserEntity?>(null) }
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             LargeTopAppBar(
                 title = {
@@ -55,12 +61,11 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onNavigateToLogs) {
+                        Icon(Icons.Outlined.BugReport, contentDescription = "日志")
+                    }
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(
-                            Icons.Outlined.Settings,
-                            contentDescription = "设置",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                        Icon(Icons.Outlined.Settings, contentDescription = "设置")
                     }
                 },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
@@ -83,105 +88,150 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Download state banner
-            AnimatedVisibility(
-                visible = downloadState !is DownloadState.Idle,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                when (val state = downloadState) {
-                    is DownloadState.Loading -> {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            )
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = state.message,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                LinearProgressIndicator(
-                                    modifier = Modifier.fillMaxWidth(),
+            // Download progress card
+            when (val state = downloadState) {
+                is DownloadState.Loading -> {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
                                     color = MaterialTheme.colorScheme.primary
                                 )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = state.message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (state.currentFile.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = state.currentFile,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (state.totalCount > 0) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                LinearProgressIndicator(
+                                    progress = { state.downloadedCount.toFloat() / state.totalCount },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
                             }
                         }
                     }
-                    is DownloadState.Success -> {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer
-                            )
+                }
+                is DownloadState.Partial -> {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = state.message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
                                 )
                                 Text(
-                                    text = "下载完成! 共 ${state.count} 个文件",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    text = "成功: ${state.downloadedCount} / 失败: ${state.failedCount}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
                                 )
+                            }
+                            if (state.canRetry) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        DownloadService.retryPartial(context, state)
+                                    }
+                                ) {
+                                    Text("重试")
+                                }
                             }
                         }
                     }
-                    is DownloadState.Error -> {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            )
+                }
+                is DownloadState.Success -> {
+                    LaunchedEffect(state) {
+                        snackbarHostState.showSnackbar(
+                            message = "下载完成! 共 ${state.count} 个文件",
+                            duration = SnackbarDuration.Short
+                        )
+                        viewModel.clearState()
+                    }
+                }
+                is DownloadState.Error -> {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Error,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error
-                                )
+                            Icon(
+                                Icons.Default.Error,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = state.message,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
                             }
+                            if (state.canRetry) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        DownloadService.retry(context, state)
+                                    }
+                                ) {
+                                    Text("重试")
+                                }
+                            }
                         }
                     }
-                    is DownloadState.Idle -> {}
                 }
+                is DownloadState.Idle -> {}
             }
 
             // User list
@@ -224,6 +274,7 @@ fun HomeScreen(
                         UserCard(
                             user = user,
                             onDownload = { showDownloadDialog = user },
+                            onHistory = { onNavigateToHistory(user.id, user.screenName) },
                             onDelete = { viewModel.deleteUser(user.id) }
                         )
                     }
@@ -232,19 +283,20 @@ fun HomeScreen(
         }
     }
 
-    // Add user dialog
+    // Dialogs
     if (showAddDialog) {
+        val isCookieSet = settingsViewModel.isCookieConfigured()
         AddUserDialog(
             onDismiss = { showAddDialog = false },
             onConfirm = { screenName ->
                 val cookie = settingsViewModel.getCookieString()
                 viewModel.addUser(screenName, cookie)
                 showAddDialog = false
-            }
+            },
+            isCookieConfigured = isCookieSet
         )
     }
 
-    // Download dialog
     showDownloadDialog?.let { user ->
         DownloadDialog(
             user = user,
@@ -255,23 +307,45 @@ fun HomeScreen(
             }
         )
     }
+
+    // Handle add user result
+    LaunchedEffect(uiState) {
+        when (val state = uiState) {
+            is HomeUiState.Success -> {
+                snackbarHostState.showSnackbar(
+                    message = state.message,
+                    duration = SnackbarDuration.Short
+                )
+                viewModel.clearState()
+            }
+            is HomeUiState.Error -> {
+                snackbarHostState.showSnackbar(
+                    message = state.message,
+                    duration = SnackbarDuration.Long
+                )
+                viewModel.clearState()
+            }
+            else -> {}
+        }
+    }
 }
 
 @Composable
 fun UserCard(
     user: UserEntity,
     onDownload: () -> Unit,
+    onHistory: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 1.dp
-        )
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
             modifier = Modifier
@@ -279,12 +353,10 @@ fun UserCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // User avatar placeholder
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(CircleShape)
-                    .padding(0.dp),
+                    .clip(CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
@@ -310,137 +382,128 @@ fun UserCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium
                 )
-                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "@${user.screenName}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.CloudDownload,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "${user.totalCount}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.CloudDownload,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "${user.totalCount} 个文件",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
-            FilledTonalIconButton(
-                onClick = onDownload,
-                modifier = Modifier.size(40.dp)
-            ) {
+            IconButton(onClick = onHistory) {
                 Icon(
-                    Icons.Default.Download,
-                    contentDescription = "下载",
-                    modifier = Modifier.size(20.dp)
+                    Icons.Outlined.History,
+                    contentDescription = "历史",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(onClick = onDownload) {
+                Icon(
+                    Icons.Default.Download,
+                    contentDescription = "下载",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
 
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(40.dp)
-            ) {
+            IconButton(onClick = { showDeleteConfirm = true }) {
                 Icon(
                     Icons.Outlined.Delete,
                     contentDescription = "删除",
-                    modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                 )
             }
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除用户") },
+            text = { Text("确定要删除 @${user.screenName} 吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete()
+                        showDeleteConfirm = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 
 @Composable
 fun AddUserDialog(
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
+    onConfirm: (String) -> Unit,
+    isCookieConfigured: Boolean = false
 ) {
     var screenName by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
-            Icon(
-                Icons.Outlined.PersonAdd,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
-            )
+            Icon(Icons.Outlined.PersonAdd, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         },
-        title = {
-            Text(
-                "添加用户",
-                style = MaterialTheme.typography.headlineSmall
-            )
-        },
+        title = { Text("添加用户") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = screenName,
                     onValueChange = { screenName = it },
                     label = { Text("用户名") },
                     placeholder = { Text("例如: elonmusk") },
-                    leadingIcon = {
-                        Icon(Icons.Outlined.Person, contentDescription = null)
-                    },
+                    leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    singleLine = true
                 )
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Info,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            "请先在设置中配置Cookie",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                if (!isCookieConfigured) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("请先在设置中配置Cookie") },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    )
                 }
             }
         },
         confirmButton = {
-            Button(
+            TextButton(
                 onClick = { onConfirm(screenName) },
-                enabled = screenName.isNotBlank(),
-                shape = RoundedCornerShape(12.dp)
+                enabled = screenName.isNotBlank() && isCookieConfigured
             ) {
                 Text("添加")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        },
-        shape = RoundedCornerShape(24.dp)
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
     )
 }
 
@@ -455,132 +518,42 @@ fun DownloadDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
-            Icon(
-                Icons.Default.Download,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
-            )
+            Icon(Icons.Default.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         },
-        title = {
-            Text(
-                "下载 @${user.screenName}",
-                style = MaterialTheme.typography.headlineSmall
-            )
-        },
+        title = { Text("下载 @${user.screenName}") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Info,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            "已下载: ${user.totalCount} 个文件",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "选择下载方式",
-                    style = MaterialTheme.typography.titleSmall,
+                    "已下载: ${user.totalCount} 个文件",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                Card(
-                    onClick = { incremental = true },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (incremental)
-                            MaterialTheme.colorScheme.primaryContainer
-                        else
-                            MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                Spacer(modifier = Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = incremental,
+                        onClick = { incremental = true },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                     ) {
-                        RadioButton(
-                            selected = incremental,
-                            onClick = { incremental = true }
-                        )
-                        Column {
-                            Text(
-                                "仅下载新的",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(
-                                "跳过已下载的内容",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text("仅新内容")
                     }
-                }
-
-                Card(
-                    onClick = { incremental = false },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (!incremental)
-                            MaterialTheme.colorScheme.primaryContainer
-                        else
-                            MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    SegmentedButton(
+                        selected = !incremental,
+                        onClick = { incremental = false },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                     ) {
-                        RadioButton(
-                            selected = !incremental,
-                            onClick = { incremental = false }
-                        )
-                        Column {
-                            Text(
-                                "全部重新下载",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(
-                                "覆盖所有已下载的内容",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text("全部重下")
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = { onDownload(incremental) },
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Default.Download, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
+            TextButton(onClick = { onDownload(incremental) }) {
                 Text("开始下载")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        },
-        shape = RoundedCornerShape(24.dp)
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
     )
 }

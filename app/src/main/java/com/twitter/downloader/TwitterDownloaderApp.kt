@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import com.twitter.downloader.data.local.AppDatabase
+import com.twitter.downloader.util.Logger
 
 class TwitterDownloaderApp : Application() {
 
@@ -13,6 +14,8 @@ class TwitterDownloaderApp : Application() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        Logger.init(this)
+        Logger.i("App", "应用启动")
     }
 
     private fun createNotificationChannel() {
