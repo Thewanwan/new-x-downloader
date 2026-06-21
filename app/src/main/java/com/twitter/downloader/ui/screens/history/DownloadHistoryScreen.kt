@@ -1,6 +1,11 @@
 package com.twitter.downloader.ui.screens.history
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -152,6 +157,7 @@ fun DownloadHistoryScreen(
 
 @Composable
 fun DownloadHistoryItem(download: DownloadEntity) {
+    val context = LocalContext.current
     val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
     val tweetDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     val tweetDate = remember(download.tweetTime) {
@@ -159,6 +165,15 @@ fun DownloadHistoryItem(download: DownloadEntity) {
     }
     val downloadDate = remember(download.createdAt) {
         dateFormat.format(Date(download.createdAt))
+    }
+
+    fun copyPath() {
+        if (download.filePath.isNotEmpty()) {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("file path", download.filePath)
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(context, "路径已复制", Toast.LENGTH_SHORT).show()
+        }
     }
 
     Card(
@@ -208,6 +223,17 @@ fun DownloadHistoryItem(download: DownloadEntity) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (download.filePath.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "保存: ${download.filePath.substringAfterLast("/")}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable { copyPath() }
+                    )
+                }
             }
         }
     }

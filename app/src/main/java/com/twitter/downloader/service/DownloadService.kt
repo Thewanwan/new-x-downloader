@@ -105,11 +105,18 @@ class DownloadService : Service() {
                     return@launch
                 }
 
-                val saveDir = File(externalDir, screenName)
+                // 使用应用默认下载目录
+                val downloadDir = File(externalDir, "Downloads")
+                if (!downloadDir.exists()) {
+                    downloadDir.mkdirs()
+                }
+
+                val saveDir = File(downloadDir, screenName)
                 if (!saveDir.exists() && !saveDir.mkdirs()) {
                     _downloadState.value = DownloadState.Error("无法创建保存目录")
                     return@launch
                 }
+                Logger.i("Download", "保存路径: ${saveDir.absolutePath}")
 
                 val existingUrls = if (incremental) {
                     repository.getDownloadedUrls(userId)
