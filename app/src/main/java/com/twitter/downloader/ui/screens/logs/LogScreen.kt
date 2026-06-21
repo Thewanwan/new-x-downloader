@@ -1,5 +1,6 @@
 package com.twitter.downloader.ui.screens.logs
 
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -8,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,14 +35,24 @@ fun LogScreen(
     var logs by remember { mutableStateOf(Logger.getLogs()) }
     var showClearDialog by remember { mutableStateOf(false) }
 
+    fun shareLogs() {
+        val logText = logs.joinToString("\n")
+        if (logText.isEmpty()) {
+            return
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, logText)
+            putExtra(Intent.EXTRA_SUBJECT, "X Downloader Logs")
+        }
+        context.startActivity(Intent.createChooser(intent, "分享日志"))
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "日志",
-                        fontWeight = FontWeight.Medium
-                    )
+                    Text("日志", fontWeight = FontWeight.Medium)
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -48,25 +60,16 @@ fun LogScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        logs = Logger.getLogs()
-                    }) {
-                        Icon(
-                            Icons.Default.Share,
-                            contentDescription = "刷新"
-                        )
+                    IconButton(onClick = { logs = Logger.getLogs() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                    }
+                    IconButton(onClick = { shareLogs() }) {
+                        Icon(Icons.Default.Share, contentDescription = "分享")
                     }
                     IconButton(onClick = { showClearDialog = true }) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "清空日志",
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                        Icon(Icons.Default.Delete, contentDescription = "清空", tint = MaterialTheme.colorScheme.error)
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                }
             )
         }
     ) { padding ->
@@ -75,14 +78,11 @@ fun LogScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Log file info
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Row(
@@ -90,32 +90,15 @@ fun LogScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "共 ${logs.size} 条日志",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("共 ${logs.size} 条日志", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        Logger.getLogFile()?.name ?: "",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(Logger.getLogFile()?.name ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
             if (logs.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "暂无日志",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text("暂无日志", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 LazyColumn(
@@ -137,20 +120,14 @@ fun LogScreen(
             title = { Text("清空日志") },
             text = { Text("确定要清空所有日志吗？") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        Logger.clearLogs()
-                        logs = Logger.getLogs()
-                        showClearDialog = false
-                    }
-                ) {
-                    Text("确定")
-                }
+                TextButton(onClick = {
+                    Logger.clearLogs()
+                    logs = emptyList()
+                    showClearDialog = false
+                }) { Text("确定") }
             },
             dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) {
-                    Text("取消")
-                }
+                TextButton(onClick = { showClearDialog = false }) { Text("取消") }
             }
         )
     }
@@ -160,7 +137,6 @@ fun LogScreen(
 fun LogItem(logEntry: String) {
     val isError = logEntry.contains("E/")
     val isWarning = logEntry.contains("W/")
-
     val backgroundColor = when {
         isError -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
         isWarning -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
@@ -175,10 +151,7 @@ fun LogItem(logEntry: String) {
         Text(
             text = logEntry,
             modifier = Modifier.padding(8.dp),
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp
-            ),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
             color = MaterialTheme.colorScheme.onSurface
         )
     }

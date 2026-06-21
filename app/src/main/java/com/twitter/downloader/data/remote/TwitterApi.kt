@@ -67,17 +67,20 @@ class TwitterApi {
     suspend fun getUserInfo(screenName: String, cookie: String): UserInfo? = withContext(Dispatchers.IO) {
         val csrfToken = extractCsrfToken(cookie)
         if (csrfToken.isEmpty()) {
-            Logger.w("API", "CSRF token为空，cookie格式可能错误")
+            Logger.e("API", "CSRF token为空! Cookie格式错误。Cookie内容: ${cookie.take(80)}...")
             return@withContext null
         }
-        Logger.d("API", "获取用户信息: @$screenName, csrfToken: ${csrfToken.take(10)}...")
+        Logger.i("API", "获取用户: @$screenName")
+        Logger.d("API", "Cookie: ${cookie.take(50)}...")
+        Logger.d("API", "CSRF: $csrfToken")
 
         val headers = buildHeaders(cookie, csrfToken, "https://x.com/$screenName")
 
         val variables = """{"screen_name":"$screenName","withSafetyModeUserFields":false}"""
-        val features = """{"hidden_profile_likes_enabled":false,"hidden_profile_subscriptions_enabled":true,"responsive_web_graphql_exclude_directive_enabled":true,"verified_phone_label_enabled":false,"subscriptions_verification_info_verified_since_enabled":true,"highlights_tweets_tab_ui_enabled":true,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"responsive_web_graphql_timeline_navigation_enabled":true}"""
+        val features = """{"hidden_profile_likes_enabled":false,"hidden_profile_subscriptions_enabled":false,"responsive_web_graphql_exclude_directive_enabled":true,"verified_phone_label_enabled":false,"subscriptions_verification_info_verified_since_enabled":true,"highlights_tweets_tab_ui_enabled":true,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"responsive_web_graphql_timeline_navigation_enabled":true}"""
+        val fieldToggles = """{"withAuxiliaryUserLabels":false}"""
 
-        val url = "https://twitter.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName?variables=$variables&features=$features"
+        val url = "https://twitter.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName?variables=$variables&features=$features&fieldToggles=$fieldToggles"
 
         val request = Request.Builder()
             .url(url)
@@ -85,47 +88,68 @@ class TwitterApi {
             .get()
             .build()
 
-        client.newCall(request).execute().use { response ->
-            Logger.d("API", "响应码: ${response.code}")
-            when (response.code) {
-                429 -> {
-                    Logger.e("API", "API次数已超限")
-                    throw Exception("API次数已超限，请稍后再试")
+        try {
+            client.newCall(request).execute().use { response ->
+                Logger.i("API", "响应码: ${response.code}")
+
+                val body = response.body?.string() ?: ""
+                Logger.d("API", "响应: ${body.take(300)}")
+
+                when (response.code) {
+                    429 -> {
+                        Logger.e("API", "API次数已超限")
+                        throw Exception("API次数已超限，请稍后再试")
+                    }
+                    401, 403 -> {
+                        Logger.e("API", "Cookie无效: ${response.code}")
+                        throw Exception("Cookie无效或已过期，请重新获取")
+                    }
+                    404 -> {
+                        Logger.e("API", "用户不存在: @$screenName")
+                        throw Exception("用户不存在: @$screenName")
+                    }
                 }
-                401, 403 -> {
-                    Logger.e("API", "Cookie无效: ${response.code}")
-                    throw Exception("Cookie无效或已过期，请重新获取")
+
+                if (body.contains("Rate limit exceeded")) {
+                    Logger.e("API", "Rate limit exceeded")
+                    throw Exception("API次数已超限")
                 }
-                404 -> {
-                    Logger.e("API", "用户不存在: @$screenName")
-                    throw Exception("用户不存在: @$screenName")
+
+                if (body.isEmpty()) {
+                    Logger.e("API", "响应体为空")
+                    return@withContext null
+                }
+
+                try {
+                    val data = json.parseToJsonElement(body).jsonObject
+                    val userResult = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
+                    if (userResult == null) {
+                        Logger.e("API", "未找到user result，响应: ${body.take(500)}")
+                        return@withContext null
+                    }
+                    val legacy = userResult["legacy"]?.jsonObject
+                    if (legacy == null) {
+                        Logger.e("API", "未找到legacy数据")
+                        return@withContext null
+                    }
+
+                    val userInfo = UserInfo(
+                        restId = safeGetString(userResult, "rest_id"),
+                        screenName = screenName,
+                        name = safeGetString(legacy, "name"),
+                        statusesCount = safeGetInt(legacy, "statuses_count"),
+                        mediaCount = safeGetInt(legacy, "media_count")
+                    )
+                    Logger.i("API", "获取成功: ${userInfo.name} (ID: ${userInfo.restId})")
+                    userInfo
+                } catch (e: Exception) {
+                    Logger.e("API", "解析响应失败: ${e.message}", e)
+                    null
                 }
             }
-
-            val body = response.body?.string() ?: return@use null
-            Logger.d("API", "响应长度: ${body.length}")
-
-            if (body.contains("Rate limit exceeded")) {
-                Logger.e("API", "Rate limit exceeded")
-                throw Exception("API次数已超限")
-            }
-
-            try {
-                val data = json.parseToJsonElement(body).jsonObject
-                val userResult = data["data"]?.jsonObject?.get("user")?.jsonObject?.get("result")?.jsonObject
-                    ?: return@use null
-                val legacy = userResult["legacy"]?.jsonObject ?: return@use null
-
-                UserInfo(
-                    restId = safeGetString(userResult, "rest_id"),
-                    screenName = screenName,
-                    name = safeGetString(legacy, "name"),
-                    statusesCount = safeGetInt(legacy, "statuses_count"),
-                    mediaCount = safeGetInt(legacy, "media_count")
-                )
-            } catch (e: Exception) {
-                null
-            }
+        } catch (e: Exception) {
+            Logger.e("API", "请求异常: ${e.message}", e)
+            throw e
         }
     }
 
@@ -149,7 +173,7 @@ class TwitterApi {
 
         try {
             val request = Request.Builder()
-                .url(urlEncode(url))
+                .url(url)
                 .apply { headers.forEach { (k, v) -> addHeader(k, v) } }
                 .get()
                 .build()
@@ -315,7 +339,31 @@ class TwitterApi {
     }
 
     private fun urlEncode(url: String): String {
-        return url.replace("{", "%7B").replace("}", "%7D")
+        val questionMarkIndex = url.indexOf('?')
+        if (questionMarkIndex == -1) return url
+
+        val baseUrl = url.substring(0, questionMarkIndex)
+        val queryString = url.substring(questionMarkIndex + 1)
+
+        val encodedParams = queryString.split("&").joinToString("&") { param ->
+            val eqIndex = param.indexOf('=')
+            if (eqIndex == -1) {
+                param
+            } else {
+                val key = param.substring(0, eqIndex)
+                val value = param.substring(eqIndex + 1)
+                val encodedValue = value
+                    .replace("{", "%7B")
+                    .replace("}", "%7D")
+                    .replace("\"", "%22")
+                    .replace(":", "%3A")
+                    .replace(",", "%2C")
+                    .replace(" ", "%20")
+                "$key=$encodedValue"
+            }
+        }
+
+        return "$baseUrl?$encodedParams"
     }
 
     suspend fun downloadFile(url: String, maxRetries: Int = 3): ByteArray? = withContext(Dispatchers.IO) {
