@@ -20,15 +20,15 @@ android {
     signingConfigs {
         create("release") {
             val storeFilePath = System.getenv("KEYSTORE_FILE") ?: ""
-            val storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            val storePwd = System.getenv("KEYSTORE_PASSWORD") ?: ""
             val keyAlias = System.getenv("KEY_ALIAS") ?: ""
-            val keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            val keyPwd = System.getenv("KEY_PASSWORD") ?: ""
 
             if (storeFilePath.isNotEmpty()) {
                 storeFile = file(storeFilePath)
-                storePassword = storePassword
+                storePassword = storePwd
                 this.keyAlias = keyAlias
-                this.keyPassword = keyPassword
+                this.keyPassword = keyPwd
             }
         }
     }
